@@ -1,0 +1,40 @@
+{
+  "config": {
+    "seed": 42,
+    "dataset": "sklearn_digits",
+    "test_size": 0.15,
+    "val_size": 0.15,
+    "hidden_dims": [
+      256,
+      128,
+      64
+    ],
+    "activation": "relu",
+    "lr": 0.01,
+    "lr_decay": 0.95,
+    "lr_decay_every": 20,
+    "batch_size": 32,
+    "epochs": 150,
+    "l2_lambda": 0.0001,
+    "dropout_rate": 0.3,
+    "output_dir": "/mnt/user-data/outputs/nn_golden_rules"
+  },
+  "sanity_check": {
+    "final_loss": 0.0001745977900740031,
+    "accuracy": 100
+  },
+  "capacity_check": {
+    "final_loss": 0.0031055016790104695,
+    "accuracy": 1.0
+  },
+  "training": {
+    "best_epoch": 93,
+    "best_val_acc": 0.9629629629629629,
+    "train_time_s": 12.99516487121582
+  },
+  "final_test": {
+    "dummy_baseline": 0.1,
+    "nn_accuracy": 0.9629629629629629,
+    "improvement": 0.8629629629629629
+  }
+}

@@ -1,0 +1,10 @@
+# ============================================================
+# Requirements — Neural Network from Scratch (NumPy)
+# Golden Rules of NN Training & Optimization
+# ============================================================
+# Python >= 3.9 recommended
+
+numpy>=1.24.0          # Core math engine — our "deep learning framework"
+scikit-learn>=1.2.0    # Dataset, preprocessing, metrics
+matplotlib>=3.7.0      # Visualization of losses, curves, weight distributions
+scipy>=1.10.0          # Optional: stats for reproducibility validation
