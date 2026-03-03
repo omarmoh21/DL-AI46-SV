@@ -1,4 +1,4 @@
-# Golden Rules Diagnostics
+# Golden Rules Diagnostics breif of what happened
 
 ## What is this image about?
 This image shows the **golden rules** for diagnosing problems in deep learning models. It helps us understand what's going wrong when our model doesn't work well.
