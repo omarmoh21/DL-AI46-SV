@@ -1,30 +1,23 @@
 """
-╔══════════════════════════════════════════════════════════════════════════════╗
-║      THE GOLDEN RULES OF NN TRAINING & OPTIMIZATION — FROM SCRATCH          ║
-║      Dataset : scikit-learn Digits (8×8 handwritten digit images)            ║
-║      Framework : Pure NumPy  (no magic — we see every gradient!)             ║
-║      Author  : Reproducible ML Experiment                                    ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-
-GOLDEN RULES APPLIED (in order):
-  Rule 0  — Reproducibility  : seed everything, document everything
-  Rule 1  — Sanity Check     : train on a SINGLE sample → must overfit to ~100%
-  Rule 2  — Data Pipeline    : normalize, shuffle, split properly
-  Rule 3  — Baseline First   : dummy classifier → know your floor
-  Rule 4  — Overfit Small    : 100 samples → verify learning capacity
-  Rule 5  — Regularize       : L2 weight decay + Dropout
-  Rule 6  — Learning Rate    : LR range search + decay schedule
-  Rule 7  — Batch Size       : mini-batch SGD, study effect
-  Rule 8  — Monitor Everything: loss curves, gradient norms, weight stats
-  Rule 9  — Final Evaluation : test set — touched ONCE at the very end
+Training checklist I actually follow in practice:
+0. Fix seeds so results are reproducible
+1. Overfit one sample (debug gradients early)
+2. Clean data pipeline (no leakage)
+3. Establish a dumb baseline
+4. Overfit a small subset to check capacity
+5. Add regularization only after it works
+6. Tune learning rate + decay
+7. Use mini-batches
+8. Track losses, accuracy, gradients
+9. Touch test set once at the end
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 0. IMPORTS & GLOBAL SEED  ← Rule 0: Reproducibility starts HERE
+# 0. IMPORTS & GLOBAL SEED  
 # ─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")          # Non-interactive backend for file saving
+matplotlib.use("Agg")          
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from sklearn.datasets import load_digits
@@ -35,34 +28,28 @@ from sklearn.metrics import accuracy_score, classification_report
 import os, time, json, warnings
 warnings.filterwarnings("ignore")
 
-# ──────────────────────────────────────────────────
-# THE MOST IMPORTANT LINE IN ANY ML SCRIPT
-# Without this, results change every run → meaningless comparisons
-# ──────────────────────────────────────────────────
 GLOBAL_SEED = 42
 np.random.seed(GLOBAL_SEED)
-
-# Config — centralised so nothing is "magic" buried in code
 CFG = {
     "seed"        : GLOBAL_SEED,
-    "dataset"     : "sklearn_digits",  # 1797 samples, 64 features, 10 classes
+    "dataset"     : "sklearn_digits",  
     "test_size"   : 0.15,
     "val_size"    : 0.15,
-    "hidden_dims" : [256, 128, 64],    # 3-layer MLP
+    "hidden_dims" : [256, 128, 64],    
     "activation"  : "relu",
     "lr"          : 0.01,
-    "lr_decay"    : 0.95,              # multiply LR by this every 20 epochs
+    "lr_decay"    : 0.95,              
     "lr_decay_every": 20,
     "batch_size"  : 32,
     "epochs"      : 150,
-    "l2_lambda"   : 1e-4,             # L2 regularisation strength
-    "dropout_rate": 0.3,              # fraction of neurons to drop during training
+    "l2_lambda"   : 1e-4,          
+    "dropout_rate": 0.3,              
     "output_dir"  : "/mnt/user-data/outputs/nn_golden_rules",
 }
 
 os.makedirs(CFG["output_dir"], exist_ok=True)
 print("=" * 70)
-print("  GOLDEN RULES EXPERIMENT — NumPy Neural Network from Scratch")
+print("  GOLDEN RULES EXPERIMENT —  Neural Network from Scratch")
 print("=" * 70)
 print(f"\n[Config] Global seed : {CFG['seed']}")
 print(f"[Config] Architecture: 64 → {CFG['hidden_dims']} → 10")
@@ -83,15 +70,13 @@ print(f"\n[Data] Total samples : {X_raw.shape[0]}")
 print(f"[Data] Feature dims  : {X_raw.shape[1]}  (8×8 pixel intensities)")
 print(f"[Data] Classes       : {len(np.unique(y_raw))}  (digits 0–9)")
 print(f"[Data] Class dist    : {dict(zip(*np.unique(y_raw, return_counts=True)))}")
-# The dataset is fairly balanced (~180 per class) — no need for resampling.
 
-# ── First split off test set — we lock it away until the very end ──
-# Rule 9: The test set is SACRED. Peek at it = your metrics are lying.
+# ── First split off test set 
 X_temp, X_test, y_temp, y_test = train_test_split(
     X_raw, y_raw,
     test_size=CFG["test_size"],
     random_state=CFG["seed"],
-    stratify=y_raw   # maintain class balance across splits
+    stratify=y_raw   
 )
 
 # ── Split remaining into train / validation ──
@@ -105,31 +90,28 @@ X_train, X_val, y_train, y_val = train_test_split(
 
 print(f"\n[Split] Train: {X_train.shape[0]}  |  Val: {X_val.shape[0]}  |  Test: {X_test.shape[0]}")
 
-# ── Normalise: fit scaler ONLY on training data — never contaminate with val/test ──
-# This is one of the most common data leakage mistakes in the field.
+# Fit scaler on train only — never leak val/test stats
 scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train)   # ← fit here ...
-X_val   = scaler.transform(X_val)         # ← ... transform only here
-X_test  = scaler.transform(X_test)        # ← ... and here
+X_train = scaler.fit_transform(X_train)  
+X_val   = scaler.transform(X_val)         
+X_test  = scaler.transform(X_test)        
 
 print(f"[Norm] Train mean≈{X_train.mean():.4f}, std≈{X_train.std():.4f}  (should be ~0, ~1)")
 print(f"[Norm] Val   mean≈{X_val.mean():.4f}, std≈{X_val.std():.4f}")
-# If val/test mean or std drifts far from 0/1, that's a red flag for leakage.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. BASELINE — Dummy Classifier  ← Rule 3: Know Your Floor
+# 2. BASELINE — Dummy Classifier 
 # ─────────────────────────────────────────────────────────────────────────────
 print("\n" + "─" * 70)
 print("STEP 2 — Baseline: Dummy Classifier (Most-Frequent Strategy)")
 print("─" * 70)
-# If our NN can't beat random guessing, something is deeply wrong.
+# If NN can't beat random guessing, something is deeply wrong
 dummy = DummyClassifier(strategy="most_frequent", random_state=CFG["seed"])
 dummy.fit(X_train, y_train)
 dummy_acc = accuracy_score(y_val, dummy.predict(X_val))
 print(f"\n[Baseline] Dummy accuracy on val set : {dummy_acc:.4f}  ({dummy_acc*100:.1f}%)")
 print(f"[Baseline] Our NN must significantly exceed {dummy_acc*100:.1f}% to be worth anything.")
-# On 10-class balanced data, random is ~10%. Anything below 50% is suspicious.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -140,30 +122,23 @@ print("STEP 3 — Building the Neural Network (No Framework — Pure Math)")
 print("─" * 70)
 
 def relu(z):
-    """ReLU: max(0, z). Simple but powerful. Dead neurons if LR too high."""
     return np.maximum(0, z)
 
 def relu_derivative(z):
-    """Gradient flows only where z > 0 — zeros kill gradients (dying ReLU)."""
     return (z > 0).astype(float)
 
 def softmax(z):
-    """Numerically stable softmax: subtract max to prevent overflow."""
     z_stable = z - np.max(z, axis=1, keepdims=True)
     exp_z = np.exp(z_stable)
     return exp_z / np.sum(exp_z, axis=1, keepdims=True)
 
 def cross_entropy_loss(probs, y_true, weights=None, l2_lambda=0.0):
     """
-    Cross-entropy loss with optional L2 regularisation.
-    L2 penalty: (lambda/2) * sum(w²) — penalises large weights, reduces overfitting.
+    Cross-entropy loss with  L2 regularisation to penalises large weights, reduces overfitting.
     """
     n = len(y_true)
-    # Clip for numerical stability — log(0) = -inf → NaN
     probs_clipped = np.clip(probs, 1e-12, 1 - 1e-12)
     ce = -np.mean(np.log(probs_clipped[np.arange(n), y_true]))
-
-    # L2 regularisation term
     l2 = 0.0
     if weights and l2_lambda > 0:
         l2 = (l2_lambda / 2) * sum(np.sum(w ** 2) for w in weights)
@@ -172,27 +147,22 @@ def cross_entropy_loss(probs, y_true, weights=None, l2_lambda=0.0):
 
 class NeuralNetwork:
     """
-    Multi-Layer Perceptron with:
-      - He initialisation (critical for ReLU — prevents vanishing gradients)
-      - L2 regularisation
-      - Dropout
-      - Mini-batch SGD with learning rate decay
-      - Full forward + backward pass from scratch
+    Simple MLP implemented from scratch (NumPy only).
+    Supports ReLU, dropout, L2 regularization, and SGD.
     """
 
     def __init__(self, layer_dims, l2_lambda=1e-4, dropout_rate=0.3, seed=42):
-        np.random.seed(seed)  # ← Rule 0: per-object seed for reproducibility
-        self.layer_dims   = layer_dims     # e.g. [64, 256, 128, 64, 10]
+        np.random.seed(seed)  
+        self.layer_dims   = layer_dims    
         self.l2_lambda    = l2_lambda
         self.dropout_rate = dropout_rate
         self.n_layers     = len(layer_dims) - 1
-        self.params       = {}             # W1, b1, W2, b2, ...
-        self.grad_norms   = []             # track per-epoch gradient norms
+        self.params       = {}             
+        self.grad_norms   = []            
 
         # ── He Initialisation ──────────────────────────────────────────────
         # For ReLU: std = sqrt(2 / fan_in)
         # Too large → exploding gradients. Too small → vanishing gradients.
-        # He (2015) gives us the Goldilocks zone.
         for l in range(1, self.n_layers + 1):
             fan_in  = layer_dims[l - 1]
             fan_out = layer_dims[l]
@@ -210,23 +180,18 @@ class NeuralNetwork:
     def forward(self, X, training=True):
         """
         Forward pass through all layers.
-        Dropout is applied ONLY during training (not at inference!).
-        This is a classic bug — always gate dropout on 'training' flag.
+        Dropout only during training not at inference
         """
         cache = {"A0": X}
         A = X
-
         for l in range(1, self.n_layers + 1):
             W, b = self.params[f"W{l}"], self.params[f"b{l}"]
-            Z = A @ W + b                # Linear transform
+            Z = A @ W + b               
             cache[f"Z{l}"] = Z
 
-            if l < self.n_layers:        # Hidden layers → ReLU + Dropout
+            if l < self.n_layers:    
                 A = relu(Z)
-
                 if training and self.dropout_rate > 0:
-                    # Inverted dropout: scale by 1/(1-p) so test-time output
-                    # is on the same scale without needing to scale at inference.
                     mask = (np.random.rand(*A.shape) > self.dropout_rate).astype(float)
                     A /= (1.0 - self.dropout_rate)
                     A *= mask
@@ -234,7 +199,7 @@ class NeuralNetwork:
                 else:
                     cache[f"mask{l}"] = np.ones_like(A)
 
-            else:                         # Output layer → Softmax
+            else:                         
                 A = softmax(Z)
 
             cache[f"A{l}"] = A
@@ -243,34 +208,26 @@ class NeuralNetwork:
 
     def backward(self, cache, y_true):
         """
-        Backpropagation — chain rule all the way back.
-        This is THE core of deep learning. Every dL/dW flows through here.
+        Backpropagation — chain rule to compute gradients of the loss with respect to the weight
         """
         n = len(y_true)
         grads   = {}
         weights = [self.params[f"W{l}"] for l in range(1, self.n_layers + 1)]
 
-        # Gradient of softmax + cross-entropy (analytic: probs - one_hot)
+        # Gradient of softmax + cross-entropy 
         dA = cache[f"A{self.n_layers}"].copy()
         dA[np.arange(n), y_true] -= 1
         dA /= n
-
-        # Backprop through layers in reverse
         for l in range(self.n_layers, 0, -1):
             A_prev = cache[f"A{l-1}"]
             W      = self.params[f"W{l}"]
-
-            # Weight gradient + L2 regularisation gradient
             grads[f"dW{l}"] = A_prev.T @ dA + self.l2_lambda * W
             grads[f"db{l}"] = np.sum(dA, axis=0, keepdims=True)
 
             if l > 1:
-                # Propagate error to previous layer
                 dA = dA @ W.T
-                # Apply dropout mask (same mask used in forward)
                 mask = cache[f"mask{l-1}"]
                 dA *= mask / (1.0 - self.dropout_rate + 1e-8)
-                # Apply ReLU derivative
                 dA *= relu_derivative(cache[f"Z{l-1}"])
 
         return grads
@@ -283,9 +240,7 @@ class NeuralNetwork:
 
     def compute_grad_norm(self, grads):
         """
-        Global gradient norm — a vital health indicator.
-        Exploding: norm > 100 → reduce LR or clip gradients.
-        Vanishing: norm < 1e-6 → network isn't learning.
+       if norm bigger than 100 mean its exploding, if smaller than 1e-6 mean its vanishing
         """
         total = sum(np.sum(grads[k] ** 2) for k in grads if k.startswith("d"))
         return np.sqrt(total)
@@ -305,23 +260,17 @@ print("\n" + "─" * 70)
 print("STEP 4 — SANITY CHECK: Overfit on ONE Single Training Sample")
 print("─" * 70)
 print("""
-[Human Note] This is Rule #1 — THE most important debugging step.
-Before training on thousands of samples, pick ONE sample and
-verify the network can drive its loss to ~0 and accuracy to 100%.
-If it can't, something is broken: bad gradients, wrong loss, mismatched
-shapes. No amount of hyperparameter tuning fixes a fundamentally broken model.
+# Quick sanity check:
+# The model should easily overfit one sample.
+# If this fails, gradients or loss are wrong.
 """)
 
-# Pick the very first training sample
-X_one = X_train[:1]   # shape (1, 64)
-y_one = y_train[:1]   # shape (1,)
-
+X_one = X_train[:1]   
+y_one = y_train[:1]   
 layer_dims = [X_train.shape[1]] + CFG["hidden_dims"] + [10]
 
 sanity_net   = NeuralNetwork(layer_dims, l2_lambda=0.0, dropout_rate=0.0, seed=CFG["seed"])
 sanity_losses = []
-
-# Aggressive LR, no regularisation — we WANT to overfit here
 for epoch in range(300):
     probs, cache = sanity_net.forward(X_one, training=True)
     loss = cross_entropy_loss(probs, y_one)
@@ -342,8 +291,7 @@ if sanity_acc == 100 and sanity_losses[-1] < 0.01:
     print("[Sanity] ✅ PASSED — Network can overfit. Gradients flow correctly!")
 else:
     print("[Sanity] ❌ FAILED — Check your forward/backward pass before proceeding!")
-# The sanity check passes → we have confidence the math is correct.
-# Now we move to the real training pipeline.
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -353,10 +301,9 @@ print("\n" + "─" * 70)
 print("STEP 5 — Overfit on 100-sample Subset (Capacity Check)")
 print("─" * 70)
 print("""
-[Human Note] Before full training, verify the model has ENOUGH CAPACITY
+Before full training, verify the model has ENOUGH CAPACITY
 to learn the task. If it can't overfit 100 samples, the model is too small
-or the learning rate is wrong. Overfitting here is DESIRED — it means we
-have the knobs to later fight it (regularisation, dropout, early stopping).
+or the learning rate is wrong.
 """)
 
 np.random.seed(CFG["seed"])
@@ -368,7 +315,7 @@ small_net    = NeuralNetwork(layer_dims, l2_lambda=0.0, dropout_rate=0.0, seed=C
 small_losses = []
 
 for epoch in range(500):
-    probs, cache = small_net.forward(X_small, training=False)  # no dropout for overfitting
+    probs, cache = small_net.forward(X_small, training=False)  
     loss = cross_entropy_loss(probs, y_small)
     grads = small_net.backward(cache, y_small)
     small_net.update(grads, lr=0.05)
@@ -390,18 +337,9 @@ print("\n" + "─" * 70)
 print("STEP 6 — Full Training (All Golden Rules Active)")
 print("─" * 70)
 print(f"""
-[Human Note] Now we train on all {len(X_train)} training samples with:
-  ✓ He initialisation          (Rule 0 — proper weight init)
-  ✓ Normalised input data      (Rule 2 — zero mean, unit variance)
-  ✓ L2 regularisation λ={CFG['l2_lambda']}  (Rule 5 — fight overfitting)
-  ✓ Dropout {int(CFG['dropout_rate']*100)}%               (Rule 5 — fight overfitting)
-  ✓ Mini-batch SGD bs={CFG['batch_size']}     (Rule 7 — noise helps escape minima)
-  ✓ LR decay every {CFG['lr_decay_every']} epochs  (Rule 6 — fine-tune as we converge)
-  ✓ Gradient norm monitoring   (Rule 8 — catch explosions early)
-  ✓ Val loss for model select  (Rule 9 — test set stays untouched)
+ Now we train on all {len(X_train)} training samples with all the rules applied.
 """)
 
-# Re-instantiate a fresh network for full training
 np.random.seed(CFG["seed"])
 model = NeuralNetwork(
     layer_dims,
@@ -416,8 +354,8 @@ grad_norms                 = []
 lr_history                 = []
 
 best_val_acc   = 0.0
-best_weights   = None   # for model checkpointing
-patience       = 20     # early stopping patience
+best_weights   = None   
+patience       = 20     
 no_improve     = 0
 lr             = CFG["lr"]
 n_train        = len(X_train)
@@ -426,16 +364,15 @@ start_time = time.time()
 
 for epoch in range(1, CFG["epochs"] + 1):
 
-    # ── LR Decay ──────────────────────────────────────────────────────────
+    #  LR Decay 
     # Step decay: reduce LR every N epochs by a fixed factor.
-    # Intuition: large LR finds the valley, small LR finds the bottom.
     if epoch % CFG["lr_decay_every"] == 0:
         lr *= CFG["lr_decay"]
 
     lr_history.append(lr)
 
-    # ── Mini-batch shuffle ────────────────────────────────────────────────
-    # Shuffle every epoch — prevents the network from memorising sample order.
+    # Mini-batch shuffle 
+    # Shuffle every epoch to prevents the network from memorising sample order.
     idx = np.random.permutation(n_train)
     X_shuffled = X_train[idx]
     y_shuffled = y_train[idx]
@@ -459,7 +396,6 @@ for epoch in range(1, CFG["epochs"] + 1):
 
         # Backward
         grads = model.backward(cache, y_batch)
-
         # Gradient norm — logged per batch, averaged per epoch
         epoch_gnorm += model.compute_grad_norm(grads)
         n_batches   += 1
@@ -475,7 +411,6 @@ for epoch in range(1, CFG["epochs"] + 1):
     train_acc = model.accuracy(X_train, y_train)
     val_acc   = model.accuracy(X_val, y_val)
 
-    # Val loss (no regularisation — pure data loss for fair comparison)
     val_probs, _ = model.forward(X_val, training=False)
     val_loss = cross_entropy_loss(val_probs, y_val)
 
@@ -485,9 +420,8 @@ for epoch in range(1, CFG["epochs"] + 1):
     val_accs.append(val_acc)
     grad_norms.append(avg_gnorm)
 
-    # ── Model Checkpointing ────────────────────────────────────────────────
-    # Save best weights based on validation accuracy — not training accuracy!
-    # This is the difference between a model that generalises vs memorises.
+    # ── Model Checkpointing 
+    # Save best weights based on validation accuracy 
     if val_acc > best_val_acc:
         best_val_acc = val_acc
         best_epoch   = epoch
@@ -498,8 +432,7 @@ for epoch in range(1, CFG["epochs"] + 1):
         no_improve += 1
 
     # ── Early Stopping ─────────────────────────────────────────────────────
-    # Stop if val acc hasn't improved in 'patience' epochs.
-    # This is regularisation through training duration.
+
     if no_improve >= patience:
         print(f"\n[Early Stop] No val improvement for {patience} epochs. Stopping at epoch {epoch}.")
         break
@@ -525,16 +458,15 @@ print("[Train] Restored best model weights from epoch", best_epoch)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7. RULE 9 — FINAL EVALUATION ON TEST SET (touched for the first time!)
+# 7. RULE 9 — FINAL EVALUATION ON TEST SET 
 # ─────────────────────────────────────────────────────────────────────────────
 print("\n" + "─" * 70)
 print("STEP 7 — Final Evaluation on HELD-OUT Test Set")
 print("─" * 70)
 print("""
-[Human Note] We touch the test set EXACTLY ONCE — right now.
-All hyperparameter choices (LR, dropout, L2, architecture) were made
-using the validation set. The test set is our honest, unbiased estimate
-of how the model performs in the real world. Peeking earlier would be cheating.
+# The test set is evaluated exactly once.
+# No tuning, no debugging, no decisions are made based on test results.
+# This provides an unbiased estimate of real-world performance.
 """)
 
 test_acc = model.accuracy(X_test, y_test)
@@ -646,7 +578,6 @@ style_ax(ax7, "Rule 8 — W1 Weight Distribution")
 ax7.set_xlabel("Weight Value")
 ax7.set_ylabel("Count")
 ax7.legend(fontsize=7, labelcolor="white")
-# Ideally: ~Gaussian, mean near 0. Not all zeros (dead), not huge (exploding).
 
 # ── Plot 8: Sample digit predictions ─────────────────────────────────────
 ax8 = fig.add_subplot(gs[2, 1])
@@ -659,7 +590,6 @@ inner_gs = gridspec.GridSpecFromSubplotSpec(2, 4, subplot_spec=gs[2, 1], hspace=
 for i in range(8):
     inner_ax = fig.add_subplot(inner_gs[i // 4, i % 4])
     inner_ax.set_facecolor(AX_BG)
-    # Un-normalise for display: scaler.inverse_transform
     img = scaler.inverse_transform(X_test[i:i+1]).reshape(8, 8)
     pred = model.predict(X_test[i:i+1])[0]
     true = y_test[i]
@@ -668,7 +598,7 @@ for i in range(8):
     inner_ax.set_title(f"P:{pred}", color=color, fontsize=7, pad=1)
     inner_ax.axis("off")
 
-# ── Plot 9: Final Summary Stats ───────────────────────────────────────────
+# ── Plot 9: Final Summary Stats 
 ax9 = fig.add_subplot(gs[2, 2])
 ax9.set_facecolor(AX_BG)
 ax9.axis("off")
